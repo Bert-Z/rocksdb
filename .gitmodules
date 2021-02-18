@@ -1,3 +1,6 @@
 [submodule "third-party/SuRF"]
 	path = third-party/SuRF
 	url = git@github.com:Bert-Z/SuRF.git
+[submodule "third-party/Rosetta"]
+	path = third-party/Rosetta
+	url = git@github.com:Bert-Z/Elastic-Rose.git
