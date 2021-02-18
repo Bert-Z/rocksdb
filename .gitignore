@@ -72,3 +72,6 @@ tp2/
 fbcode/
 fbcode
 buckifier/*.pyc
+
+filter_experiment/data*
+filter_experiment/poisson_*

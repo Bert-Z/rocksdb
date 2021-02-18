@@ -58,6 +58,8 @@ void init(const std::string& key_path, const std::string& db_path, rocksdb::DB**
 	table_options->filter_policy.reset(rocksdb::NewSuRFPolicy(1, 4, true, 16, false));
     else if (filter_type == 4)
 	table_options->filter_policy.reset(rocksdb::NewSuRFPolicy(2, 4, true, 16, false));
+    else if (filter_type == 5)
+    table_options->filter_policy.reset(rocksdb::NewRosettaPolicy(false));
 
     if (table_options->filter_policy == nullptr)
 	std::cout << "Filter DISABLED\n";
@@ -466,6 +468,7 @@ int main(int argc, const char* argv[]) {
 	std::cout << "\t2: SuRF\n";
 	std::cout << "\t3: SuRF Hash\n";
 	std::cout << "\t4: SuRF Real\n";
+    std::cout << "\t5: Rosetta\n";
 	std::cout << "arg 3: compression?\n";
 	std::cout << "\t0: no compression\n";
 	std::cout << "\t1: Snappy\n";

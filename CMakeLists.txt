@@ -344,6 +344,7 @@ include_directories(${PROJECT_SOURCE_DIR})
 include_directories(${PROJECT_SOURCE_DIR}/include)
 include_directories(SYSTEM ${PROJECT_SOURCE_DIR}/third-party/gtest-1.7.0/fused-src)
 include_directories(${PROJECT_SOURCE_DIR}/third-party/SuRF/include)
+include_directories(${PROJECT_SOURCE_DIR}/third-party/Rosetta/include)
 find_package(Threads REQUIRED)
 
 add_subdirectory(third-party/gtest-1.7.0/fused-src/gtest)
@@ -474,7 +475,8 @@ set(SOURCES
         util/arena.cc
         util/auto_roll_logger.cc
         util/bloom.cc
-	util/surf.cc # huanchen
+  util/surf.cc # huanchen
+  util/rosetta.cc # wanqiang
         util/coding.cc
         util/compaction_job_stats_impl.cc
         util/comparator.cc
