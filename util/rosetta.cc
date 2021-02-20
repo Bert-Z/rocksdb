@@ -34,6 +34,7 @@ class FullRosettaBitsBuilder : public FilterBitsBuilder {
 
     uint64_t size = filter->serializedSize();
     char* data = filter->serialize();
+    delete filter;
 
     buf->reset(data);
     return Slice(data, size);
