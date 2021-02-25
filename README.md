@@ -29,7 +29,7 @@ down to 2GB datasets here (the 100GB configs are still included in
 
     cd filter_experiment
     python poisson.py
-    mkdir data_no_filter data_bloom data_surf
+    mkdir data_no_filter data_bloom data_surf data_rosetta
 
 Run the executable **../build/filter_experiment/filter_experiment** will show the usage information.
 
@@ -38,6 +38,7 @@ To initialize the RocksDB instances with no filter, bloom filters and SuRFs (wit
     ../build/filter_experiment/filter_experiment data_no_filter 0 1 0 0 0 0
     ../build/filter_experiment/filter_experiment data_bloom     1 1 0 0 0 0
     ../build/filter_experiment/filter_experiment data_surf      4 1 0 0 0 0
+    ../build/filter_experiment/filter_experiment data_rosetta   5 1 0 0 0 0
 
 ## Run Benchmarks
 You may want to clear system cache (echo 3 | sudo tee /proc/sys/vm/drop_caches)
@@ -51,11 +52,13 @@ to run different experiments besides the following examples:
     ../build/filter_experiment/filter_experiment data_no_filter 0 1 1 1 0 0
     ../build/filter_experiment/filter_experiment data_bloom     1 1 1 1 0 0
     ../build/filter_experiment/filter_experiment data_surf      4 1 1 1 0 0
+    ../build/filter_experiment/filter_experiment data_rosetta   5 1 1 1 0 0
 
     // closed-range queries (50% queries return empty results)
     ../build/filter_experiment/filter_experiment data_no_filter 0 1 1 3 69310 0
     ../build/filter_experiment/filter_experiment data_bloom     1 1 1 3 69310 0
     ../build/filter_experiment/filter_experiment data_surf      4 1 1 3 69310 0
+    ../build/filter_experiment/filter_experiment data_rosetta   5 1 1 3 69310 0
 
 
 ## RocksDB: A Persistent Key-Value Store for Flash and RAM Storage
