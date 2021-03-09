@@ -72,3 +72,10 @@ tp2/
 fbcode/
 fbcode
 buckifier/*.pyc
+
+filter_experiment/data*
+filter_experiment/*data
+filter_experiment/poisson_*
+filter_experiment/result
+filter_experiment/workloads
+.vscode/
