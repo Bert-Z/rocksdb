@@ -18,6 +18,7 @@
 #include "options/options_parser.h"
 #include "rocksdb/flush_block_policy.h"
 #include "rocksdb/table.h"
+#include "table/table_reader.h"
 
 namespace rocksdb {
 
@@ -35,10 +36,23 @@ class BlockBasedTableFactory : public TableFactory {
 
   const char* Name() const override { return kName.c_str(); }
 
+  // wanqiang
+  virtual void SetFileId(TableReader *table_reader,int file_id ){ table_reader->SetFileId(file_id); }
+  virtual void SetAssignmentMap(TableReader *table_reader,std::map<uint64_t,int> *assignment_map){ table_reader->SetAssignmentMap(assignment_map); }
+
   Status NewTableReader(
       const TableReaderOptions& table_reader_options,
       unique_ptr<RandomAccessFileReader>&& file, uint64_t file_size,
       unique_ptr<TableReader>* table_reader,
+      bool prefetch_index_and_filter_in_cache = true) const override;
+  
+  // wanqiang
+  Status NewElasticTableReader(
+      const TableReaderOptions& table_reader_options,
+      unique_ptr<RandomAccessFileReader>&& file, uint64_t file_size,
+      unique_ptr<TableReader>* table_reader,
+      int file_id,
+      std::map<uint64_t,int>* assignment_map,
       bool prefetch_index_and_filter_in_cache = true) const override;
 
   TableBuilder* NewTableBuilder(

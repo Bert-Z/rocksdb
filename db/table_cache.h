@@ -12,6 +12,7 @@
 #pragma once
 #include <string>
 #include <vector>
+#include <map>
 #include <stdint.h>
 
 #include "db/dbformat.h"
@@ -125,6 +126,12 @@ class TableCache {
   // For example when max_open_files is -1 we set the backing Cache to this.
   static const int kInfiniteCapacity = 0x400000;
 
+  // wanqiang
+  void coutFileAccessTimes();
+
+  // wanqiang
+  std::map<uint64_t,int> *getAssignmentMap() const;
+
  private:
   // Build a table reader
   Status GetTableReader(const EnvOptions& env_options,
@@ -141,6 +148,18 @@ class TableCache {
   const EnvOptions& env_options_;
   Cache* const cache_;
   std::string row_cache_id_;
+
+
+  // wanqiang
+  // file access times map: file_id - (level_id,access_times)
+  std::shared_ptr<std::map<uint64_t,std::pair<int,uint64_t>>> file_access_map_;
+  
+  // total access times
+  uint64_t total_times_;
+
+  // assignment unit
+  std::shared_ptr<std::map<uint64_t,int>> assignment_map_;
+
 };
 
 }  // namespace rocksdb

@@ -410,6 +410,10 @@ class TableFactory {
   // by any clients of this package.
   virtual const char* Name() const = 0;
 
+  // wanqiang
+  virtual void SetFileId(TableReader* table_reader, int file_id){}
+  virtual void SetAssignmentMap(TableReader *table_reader,std::map<uint64_t,int> *assignment_map){}
+
   // Returns a Table object table that can fetch data from file specified
   // in parameter file. It's the caller's responsibility to make sure
   // file is in the correct format.
@@ -432,6 +436,15 @@ class TableFactory {
       unique_ptr<RandomAccessFileReader>&& file, uint64_t file_size,
       unique_ptr<TableReader>* table_reader,
       bool prefetch_index_and_filter_in_cache = true) const = 0;
+
+  // wanqiang
+  virtual Status NewElasticTableReader(
+      const TableReaderOptions& table_reader_options,
+      unique_ptr<RandomAccessFileReader>&& file, uint64_t file_size,
+      unique_ptr<TableReader>* table_reader,
+      int file_id,
+      std::map<uint64_t,int>* assignment_map,
+      bool prefetch_index_and_filter_in_cache = true) const {return Status();}
 
   // Return a table builder to write to a file for this table type.
   //

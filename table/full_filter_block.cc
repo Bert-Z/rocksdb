@@ -5,12 +5,12 @@
 
 #include "table/full_filter_block.h"
 
+#include <iostream>
+
 #include "monitoring/perf_context_imp.h"
 #include "port/port.h"
 #include "rocksdb/filter_policy.h"
 #include "util/coding.h"
-
-#include <iostream>
 
 namespace rocksdb {
 
@@ -97,7 +97,7 @@ bool FullFilterBlockReader::PrefixMayMatch(const Slice& prefix,
 }
 
 bool FullFilterBlockReader::MayMatch(const Slice& entry) {
-  if (contents_.size() != 0)  {
+  if (contents_.size() != 0) {
     if (filter_bits_reader_->MayMatch(entry)) {
       PERF_COUNTER_ADD(bloom_sst_hit_count, 1);
       return true;
@@ -111,18 +111,38 @@ bool FullFilterBlockReader::MayMatch(const Slice& entry) {
 
 // huanchen
 Slice FullFilterBlockReader::Seek(const Slice& key, unsigned* bitlen,
-				  uint64_t block_offset,
-				  const bool no_io,
-				  const Slice* const const_ikey_ptr) {
-    assert(block_offset == kNotValid);
-    if (!whole_key_filtering_) {
-	return Slice();
-    }
-    if (contents_.size() != 0)  {
-	return filter_bits_reader_->Seek(key, bitlen);
-    }
+                                  uint64_t block_offset, const bool no_io,
+                                  const Slice* const const_ikey_ptr) {
+  assert(block_offset == kNotValid);
+  if (!whole_key_filtering_) {
     return Slice();
+  }
+  if (contents_.size() != 0) {
+    return filter_bits_reader_->Seek(key, bitlen);
+  }
+  return Slice();
 }
+
+// // wanqiang
+// bool FullFilterBlockReader::ElasticKeyMayMatch(
+//     const Slice& key, int opensize = 3, uint64_t block_offset, const bool no_io,
+//     const Slice* const const_ikey_ptr) {
+//   assert(block_offset == kNotValid);
+//   if (!whole_key_filtering_) {
+//     return true;
+//   }
+
+//   if (contents_.size() != 0) {
+//     if (filter_bits_reader_->MayMatch(key)) {
+//       PERF_COUNTER_ADD(bloom_sst_hit_count, 1);
+//       return true;
+//     } else {
+//       PERF_COUNTER_ADD(bloom_sst_miss_count, 1);
+//       return false;
+//     }
+//   }
+//   return true;  // remain the same with block_based filter
+// }
 
 size_t FullFilterBlockReader::ApproximateMemoryUsage() const {
   return contents_.size();

@@ -476,7 +476,8 @@ set(SOURCES
         util/auto_roll_logger.cc
         util/bloom.cc
   util/surf.cc # huanchen
-  util/rosetta.cc # wanquang
+  util/rosetta.cc # wanqiang
+  util/elastic_rosetta.cc # wanqiang
         util/coding.cc
         util/compaction_job_stats_impl.cc
         util/comparator.cc

@@ -888,6 +888,297 @@ Status BlockBasedTable::Open(const ImmutableCFOptions& ioptions,
   return s;
 }
 
+// wanqiang
+Status BlockBasedTable::ElasticOpen(const ImmutableCFOptions& ioptions,
+                             const EnvOptions& env_options,
+                             const BlockBasedTableOptions& table_options,
+                             const InternalKeyComparator& internal_comparator,
+                             unique_ptr<RandomAccessFileReader>&& file,
+                             uint64_t file_size,
+                             unique_ptr<TableReader>* table_reader,
+                             int file_id,
+                             std::map<uint64_t,int> *assignment_map,
+                             const bool prefetch_index_and_filter_in_cache,
+                             const bool skip_filters, const int level) {
+  table_reader->reset();
+
+  Footer footer;
+
+  std::unique_ptr<FilePrefetchBuffer> prefetch_buffer;
+
+  // Before read footer, readahead backwards to prefetch data
+  const size_t kTailPrefetchSize = 512 * 1024;
+  size_t prefetch_off;
+  size_t prefetch_len;
+  if (file_size < kTailPrefetchSize) {
+    prefetch_off = 0;
+    prefetch_len = file_size;
+  } else {
+    prefetch_off = file_size - kTailPrefetchSize;
+    prefetch_len = kTailPrefetchSize;
+  }
+  Status s;
+  // TODO should not have this special logic in the future.
+  if (!file->use_direct_io()) {
+    s = file->Prefetch(prefetch_off, prefetch_len);
+  } else {
+    prefetch_buffer.reset(new FilePrefetchBuffer());
+    s = prefetch_buffer->Prefetch(file.get(), prefetch_off, prefetch_len);
+  }
+  s = ReadFooterFromFile(file.get(), prefetch_buffer.get(), file_size, &footer,
+                         kBlockBasedTableMagicNumber);
+  if (!s.ok()) {
+    return s;
+  }
+  if (!BlockBasedTableSupportedVersion(footer.version())) {
+    return Status::Corruption(
+        "Unknown Footer version. Maybe this file was created with newer "
+        "version of RocksDB?");
+  }
+
+  // We've successfully read the footer. We are ready to serve requests.
+  // Better not mutate rep_ after the creation. eg. internal_prefix_transform
+  // raw pointer will be used to create HashIndexReader, whose reset may
+  // access a dangling pointer.
+  Rep* rep = new BlockBasedTable::Rep(ioptions, env_options, table_options,
+                                      internal_comparator, skip_filters);
+  rep->file = std::move(file);
+  rep->footer = footer;
+  rep->index_type = table_options.index_type;
+  rep->hash_index_allow_collision = table_options.hash_index_allow_collision;
+  // We need to wrap data with internal_prefix_transform to make sure it can
+  // handle prefix correctly.
+  rep->internal_prefix_transform.reset(
+      new InternalKeySliceTransform(rep->ioptions.prefix_extractor));
+  SetupCacheKeyPrefix(rep, file_size);
+  unique_ptr<BlockBasedTable> new_table(new BlockBasedTable(rep,file_id,assignment_map));
+
+  // page cache options
+  rep->persistent_cache_options =
+      PersistentCacheOptions(rep->table_options.persistent_cache,
+                             std::string(rep->persistent_cache_key_prefix,
+                                         rep->persistent_cache_key_prefix_size),
+                                         rep->ioptions.statistics);
+
+  // Read meta index
+  std::unique_ptr<Block> meta;
+  std::unique_ptr<InternalIterator> meta_iter;
+  s = ReadMetaBlock(rep, prefetch_buffer.get(), &meta, &meta_iter);
+  if (!s.ok()) {
+    return s;
+  }
+
+  // Find filter handle and filter type
+  if (rep->filter_policy) {
+    for (auto filter_type :
+         {Rep::FilterType::kFullFilter, Rep::FilterType::kPartitionedFilter,
+          Rep::FilterType::kBlockFilter}) {
+      std::string prefix;
+      switch (filter_type) {
+        case Rep::FilterType::kFullFilter:
+          prefix = kFullFilterBlockPrefix;
+          break;
+        case Rep::FilterType::kPartitionedFilter:
+          prefix = kPartitionedFilterBlockPrefix;
+          break;
+        case Rep::FilterType::kBlockFilter:
+          prefix = kFilterBlockPrefix;
+          break;
+        default:
+          assert(0);
+      }
+      std::string filter_block_key = prefix;
+      filter_block_key.append(rep->filter_policy->Name());
+      if (FindMetaBlock(meta_iter.get(), filter_block_key, &rep->filter_handle)
+              .ok()) {
+        rep->filter_type = filter_type;
+        break;
+      }
+    }
+  }
+
+  // Read the properties
+  bool found_properties_block = true;
+  s = SeekToPropertiesBlock(meta_iter.get(), &found_properties_block);
+
+  if (!s.ok()) {
+    ROCKS_LOG_WARN(rep->ioptions.info_log,
+                   "Error when seeking to properties block from file: %s",
+                   s.ToString().c_str());
+  } else if (found_properties_block) {
+    s = meta_iter->status();
+    TableProperties* table_properties = nullptr;
+    if (s.ok()) {
+      s = ReadProperties(meta_iter->value(), rep->file.get(),
+                         prefetch_buffer.get(), rep->footer, rep->ioptions,
+                         &table_properties);
+    }
+
+    if (!s.ok()) {
+      ROCKS_LOG_WARN(rep->ioptions.info_log,
+                     "Encountered error while reading data from properties "
+                     "block %s",
+                     s.ToString().c_str());
+    } else {
+      rep->table_properties.reset(table_properties);
+    }
+  } else {
+    ROCKS_LOG_ERROR(rep->ioptions.info_log,
+                    "Cannot find Properties block from file.");
+  }
+
+  // Read the compression dictionary meta block
+  bool found_compression_dict;
+  s = SeekToCompressionDictBlock(meta_iter.get(), &found_compression_dict);
+  if (!s.ok()) {
+    ROCKS_LOG_WARN(
+        rep->ioptions.info_log,
+        "Error when seeking to compression dictionary block from file: %s",
+        s.ToString().c_str());
+  } else if (found_compression_dict) {
+    // TODO(andrewkr): Add to block cache if cache_index_and_filter_blocks is
+    // true.
+    unique_ptr<BlockContents> compression_dict_block{new BlockContents()};
+    // TODO(andrewkr): ReadMetaBlock repeats SeekToCompressionDictBlock().
+    // maybe decode a handle from meta_iter
+    // and do ReadBlockContents(handle) instead
+    s = rocksdb::ReadMetaBlock(rep->file.get(), prefetch_buffer.get(),
+                               file_size, kBlockBasedTableMagicNumber,
+                               rep->ioptions, rocksdb::kCompressionDictBlock,
+                               compression_dict_block.get());
+    if (!s.ok()) {
+      ROCKS_LOG_WARN(
+          rep->ioptions.info_log,
+          "Encountered error while reading data from compression dictionary "
+          "block %s",
+          s.ToString().c_str());
+    } else {
+      rep->compression_dict_block = std::move(compression_dict_block);
+    }
+  }
+
+  // Read the range del meta block
+  bool found_range_del_block;
+  s = SeekToRangeDelBlock(meta_iter.get(), &found_range_del_block,
+                          &rep->range_del_handle);
+  if (!s.ok()) {
+    ROCKS_LOG_WARN(
+        rep->ioptions.info_log,
+        "Error when seeking to range delete tombstones block from file: %s",
+        s.ToString().c_str());
+  } else {
+    if (found_range_del_block && !rep->range_del_handle.IsNull()) {
+      ReadOptions read_options;
+      s = MaybeLoadDataBlockToCache(
+          prefetch_buffer.get(), rep, read_options, rep->range_del_handle,
+          Slice() /* compression_dict */, &rep->range_del_entry);
+      if (!s.ok()) {
+        ROCKS_LOG_WARN(
+            rep->ioptions.info_log,
+            "Encountered error while reading data from range del block %s",
+            s.ToString().c_str());
+      }
+    }
+  }
+
+  // Determine whether whole key filtering is supported.
+  if (rep->table_properties) {
+    rep->whole_key_filtering &=
+        IsFeatureSupported(*(rep->table_properties),
+                           BlockBasedTablePropertyNames::kWholeKeyFiltering,
+                           rep->ioptions.info_log);
+    rep->prefix_filtering &= IsFeatureSupported(
+        *(rep->table_properties),
+        BlockBasedTablePropertyNames::kPrefixFiltering, rep->ioptions.info_log);
+
+    rep->global_seqno = GetGlobalSequenceNumber(*(rep->table_properties),
+                                                rep->ioptions.info_log);
+  }
+
+  const bool pin =
+      rep->table_options.pin_l0_filter_and_index_blocks_in_cache && level == 0;
+  // pre-fetching of blocks is turned on
+  // Will use block cache for index/filter blocks access
+  // Always prefetch index and filter for level 0
+  if (table_options.cache_index_and_filter_blocks) {
+    if (prefetch_index_and_filter_in_cache || level == 0) {
+      assert(table_options.block_cache != nullptr);
+      // Hack: Call NewIndexIterator() to implicitly add index to the
+      // block_cache
+
+      CachableEntry<IndexReader> index_entry;
+      unique_ptr<InternalIterator> iter(
+          new_table->NewIndexIterator(ReadOptions(), nullptr, &index_entry));
+      s = iter->status();
+      if (s.ok()) {
+        // This is the first call to NewIndexIterator() since we're in Open().
+        // On success it should give us ownership of the `CachableEntry` by
+        // populating `index_entry`.
+        assert(index_entry.value != nullptr);
+        index_entry.value->CacheDependencies(pin);
+        if (pin) {
+          rep->index_entry = std::move(index_entry);
+        } else {
+          index_entry.Release(table_options.block_cache.get());
+        }
+
+        // Hack: Call GetFilter() to implicitly add filter to the block_cache
+        auto filter_entry = new_table->GetFilter();
+        if (filter_entry.value != nullptr) {
+          filter_entry.value->CacheDependencies(pin);
+        }
+        // if pin_l0_filter_and_index_blocks_in_cache is true, and this is
+        // a level0 file, then save it in rep_->filter_entry; it will be
+        // released in the destructor only, hence it will be pinned in the
+        // cache while this reader is alive
+        if (pin) {
+          rep->filter_entry = filter_entry;
+        } else {
+          filter_entry.Release(table_options.block_cache.get());
+        }
+      }
+    }
+  } else {
+    // If we don't use block cache for index/filter blocks access, we'll
+    // pre-load these blocks, which will kept in member variables in Rep
+    // and with a same life-time as this table object.
+    IndexReader* index_reader = nullptr;
+    s = new_table->CreateIndexReader(prefetch_buffer.get(), &index_reader,
+                                     meta_iter.get(), level);
+    if (s.ok()) {
+      rep->index_reader.reset(index_reader);
+      // The partitions of partitioned index are always stored in cache. They
+      // are hence follow the configuration for pin and prefetch regardless of
+      // the value of cache_index_and_filter_blocks
+      if (prefetch_index_and_filter_in_cache || level == 0) {
+        rep->index_reader->CacheDependencies(pin);
+      }
+
+      // Set filter block
+      if (rep->filter_policy) {
+        const bool is_a_filter_partition = true;
+        auto filter = new_table->ReadFilter(
+            prefetch_buffer.get(), rep->filter_handle, !is_a_filter_partition);
+        rep->filter.reset(filter);
+        // Refer to the comment above about paritioned indexes always being
+        // cached
+        if (filter && (prefetch_index_and_filter_in_cache || level == 0)) {
+          filter->CacheDependencies(pin);
+        }
+      }
+    } else {
+      delete index_reader;
+    }
+  }
+
+  if (s.ok()) {
+    *table_reader = std::move(new_table);
+  }
+
+  return s;
+}
+
+
 void BlockBasedTable::SetupForCompaction() {
   switch (rep_->ioptions.access_hint_on_compaction_start) {
     case Options::NONE:
@@ -1173,8 +1464,13 @@ FilterBlockReader* BlockBasedTable::ReadFilter(
           rep->ioptions.statistics);
 
     case Rep::FilterType::kFullFilter: {
-      auto filter_bits_reader =
-          rep->filter_policy->GetFilterBitsReader(block.data);
+      // auto filter_bits_reader =
+      //     rep->filter_policy->GetFilterBitsReader(block.data);
+      // wanqiang
+      // std::cout<<(*assignment_map_)[file_id_]<<std::endl;
+      
+      int unit_num=(*assignment_map_)[file_id_];
+      auto filter_bits_reader = rep->filter_policy->ElasticGetFilterBitsReader(block.data,unit_num);
       assert(filter_bits_reader != nullptr);
       return new FullFilterBlockReader(
           rep->prefix_filtering ? rep->ioptions.prefix_extractor : nullptr,
@@ -1194,6 +1490,7 @@ BlockBasedTable::CachableEntry<FilterBlockReader> BlockBasedTable::GetFilter(
     FilePrefetchBuffer* prefetch_buffer, bool no_io) const {
   const BlockHandle& filter_blk_handle = rep_->filter_handle;
   const bool is_a_filter_partition = true;
+  // std::cout<<"get filter"<<std::endl;
   return GetFilter(prefetch_buffer, filter_blk_handle, !is_a_filter_partition,
                    no_io);
 }
@@ -1738,6 +2035,10 @@ Status BlockBasedTable::Get(const ReadOptions& read_options, const Slice& key,
                              read_options.read_tier == kBlockCacheTier);
   }
   FilterBlockReader* filter = filter_entry.value;
+
+  // wanqiang
+  // std::cout<< file_id_ <<std::endl;
+  // std::cout<<((*assignment_map_)[file_id_])<<std::endl;
 
   // First check the full filter
   // If full filter not useful, Then go into each block

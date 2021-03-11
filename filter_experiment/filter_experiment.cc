@@ -58,6 +58,10 @@ void init(const std::string& key_path, const std::string& db_path, rocksdb::DB**
 	table_options->filter_policy.reset(rocksdb::NewSuRFPolicy(1, 4, true, 16, false));
     else if (filter_type == 4)
 	table_options->filter_policy.reset(rocksdb::NewSuRFPolicy(2, 4, true, 16, false));
+    else if (filter_type == 5)
+	table_options->filter_policy.reset(rocksdb::NewRosettaPolicy(false, 14));
+    else if (filter_type == 6)
+	table_options->filter_policy.reset(rocksdb::NewElasticRosettaPolicy(false, 14, {5,5,5,5,5}));
 
     if (table_options->filter_policy == nullptr)
 	std::cout << "Filter DISABLED\n";
@@ -83,14 +87,14 @@ void init(const std::string& key_path, const std::string& db_path, rocksdb::DB**
     options->max_open_files = -1; // pre-load indexes and filters
 
     // 2GB config
-    //options->write_buffer_size = 2 * 1048576;
-    //options->max_bytes_for_level_base = 10 * 1048576;
-    //options->target_file_size_base = 2 * 1048576;
+    options->write_buffer_size = 2 * 1048576;
+    options->max_bytes_for_level_base = 10 * 1048576;
+    options->target_file_size_base = 2 * 1048576;
 
     // 100GB config
-    options->write_buffer_size = 64 * 1048576;
-    options->max_bytes_for_level_base = 256 * 1048576;
-    options->target_file_size_base = 64 * 1048576;
+    // options->write_buffer_size = 64 * 1048576;
+    // options->max_bytes_for_level_base = 256 * 1048576;
+    // options->target_file_size_base = 64 * 1048576;
 
     if (use_direct_io > 0)
 	options->use_direct_reads = true;
@@ -276,14 +280,18 @@ void benchPointQuery(rocksdb::DB* db, rocksdb::Options* options,
 		     uint64_t key_range, uint64_t query_count) {
     //std::random_device rd;
     //std::mt19937_64 e(rd());
-    std::mt19937_64 e(2017);
-    std::uniform_int_distribution<unsigned long long> dist(0, key_range);
+    // std::mt19937_64 e(2017);
+    // std::uniform_int_distribution<unsigned long long> dist(0, key_range);
 
     std::vector<uint64_t> query_keys;
+    std::string key_path="/home/ubuntu/rosetta-rocksdb/rocksdb/filter_experiment/workloads/txn_randint_zipfian";
+    std::ifstream keyFile(key_path);
+	std::vector<uint64_t> keys;
 
+    uint64_t r = 0;
     for (uint64_t i = 0; i < query_count; i++) {
-	uint64_t r = dist(e);
-	query_keys.push_back(r);
+        keyFile >> r;
+        query_keys.push_back(r);
     }
 
     struct timespec ts_start;
@@ -524,7 +532,7 @@ void benchClosedRangeQuery(rocksdb::DB* db, uint64_t key_count, uint64_t key_gap
 */
 
 void printIO() {
-    FILE* fp = fopen("/sys/block/sda/sda2/stat", "r");
+    FILE* fp = fopen("/sys/block/vda/vda1/stat", "r");
     if (fp == NULL) {
 	printf("Error: empty fp\n");
 	printf("%s\n", strerror(errno));
@@ -538,7 +546,7 @@ void printIO() {
 }
 
 uint64_t getIOCount() {
-    std::ifstream io_file(std::string("/sys/block/sda/sda2/stat"));
+    std::ifstream io_file(std::string("/sys/block/vda/vda1/stat"));
     uint64_t io_count = 0;
     io_file >> io_count;
     return io_count;
@@ -599,18 +607,19 @@ int main(int argc, const char* argv[]) {
     uint64_t scan_length = 1;
     //uint64_t range_size = 5000000;
 
-    const std::string kKeyPath = "/home/huanchen/rocksdb/filter_experiment/poisson_timestamps.csv";
+    // const std::string kKeyPath = "/home/ubuntu/rosetta-rocksdb/rocksdb/filter_experiment/poisson_timestamps.csv";
+    const std::string kKeyPath = "/home/ubuntu/rosetta-rocksdb/rocksdb/filter_experiment/workloads/load_randint";
     const uint64_t kValueSize = 1000;
     const uint64_t kKeyRange = 10000000000000;
     const uint64_t kQueryCount = 50000;
     
     // 2GB config
-    //const uint64_t kKeyCount = 2000000;
-    //const uint64_t kWarmupSampleGap = 100;
+    const uint64_t kKeyCount = 2000000;
+    const uint64_t kWarmupSampleGap = 100;
 
     // 100GB config
-    const uint64_t kKeyCount = 100000000;
-    const uint64_t kWarmupSampleGap = kKeyCount / warmup_query_count;
+    // const uint64_t kKeyCount = 100000000;
+    // const uint64_t kWarmupSampleGap = kKeyCount / warmup_query_count;
 
     //=========================================================================
     

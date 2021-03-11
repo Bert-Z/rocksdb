@@ -18,17 +18,19 @@
 
 #pragma once
 
-#include <memory>
 #include <stddef.h>
 #include <stdint.h>
+
+#include <memory>
 #include <string>
 #include <vector>
+
+#include "format.h"
 #include "rocksdb/options.h"
 #include "rocksdb/slice.h"
 #include "rocksdb/slice_transform.h"
 #include "rocksdb/table.h"
 #include "util/hash.h"
-#include "format.h"
 
 namespace rocksdb {
 
@@ -48,10 +50,10 @@ class FilterBlockBuilder {
   explicit FilterBlockBuilder() {}
   virtual ~FilterBlockBuilder() {}
 
-  virtual bool IsBlockBased() = 0;                    // If is blockbased filter
+  virtual bool IsBlockBased() = 0;  // If is blockbased filter
   virtual void StartBlock(uint64_t block_offset) = 0;  // Start new block filter
-  virtual void Add(const Slice& key) = 0;      // Add a key to current filter
-  Slice Finish() {                             // Generate Filter
+  virtual void Add(const Slice& key) = 0;  // Add a key to current filter
+  Slice Finish() {                         // Generate Filter
     const BlockHandle empty_handle;
     Status dont_care_status;
     auto ret = Finish(empty_handle, &dont_care_status);
@@ -105,12 +107,21 @@ class FilterBlockReader {
 
   // huanchen
   virtual Slice Seek(const Slice& key, unsigned* bitlen,
-		     uint64_t block_offset = kNotValid,
-		     const bool no_io = false,
-		     const Slice* const const_ikey_ptr = nullptr) {
-      return Slice();
+                     uint64_t block_offset = kNotValid,
+                     const bool no_io = false,
+                     const Slice* const const_ikey_ptr = nullptr) {
+    return Slice();
   }
-  
+
+  // // wanqiang
+  // virtual bool ElasticKeyMayMatch(const Slice& key,
+  //                                 int opensize = 3,
+  //                                 uint64_t block_offset = kNotValid,
+  //                                 const bool no_io = false,
+  //                                 const Slice* const const_ikey_ptr = nullptr) {
+  //   return true;
+  // };
+
   virtual size_t ApproximateMemoryUsage() const = 0;
   virtual size_t size() const { return size_; }
   virtual Statistics* statistics() const { return statistics_; }

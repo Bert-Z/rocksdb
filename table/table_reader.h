@@ -104,6 +104,10 @@ class TableReader {
   }
 
   virtual void Close() {}
+
+  // wanqiang
+  virtual void SetFileId(int file_id){}
+  virtual void SetAssignmentMap(std::map<uint64_t,int> *assignment_map){}
 };
 
 }  // namespace rocksdb

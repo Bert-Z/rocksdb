@@ -53,6 +53,9 @@ struct ReadOptions;
 class GetContext;
 class InternalIterator;
 
+// wanqiang
+class TableCache;
+
 using std::unique_ptr;
 
 typedef std::vector<std::pair<std::string, std::string>> KVPairBlock;
@@ -94,6 +97,18 @@ class BlockBasedTable : public TableReader {
                      bool prefetch_index_and_filter_in_cache = true,
                      bool skip_filters = false, int level = -1);
 
+
+  // wanqiang
+  static Status ElasticOpen(const ImmutableCFOptions& ioptions,
+                    const EnvOptions& env_options,
+                    const BlockBasedTableOptions& table_options,
+                    const InternalKeyComparator& internal_key_comparator,
+                    unique_ptr<RandomAccessFileReader>&& file,
+                    uint64_t file_size, unique_ptr<TableReader>* table_reader,
+                    int file_id,
+                    std::map<uint64_t,int> *assignment_map,
+                    bool prefetch_index_and_filter_in_cache = true,
+                    bool skip_filters = false, int level = -1);
   bool PrefixMayMatch(const Slice& internal_key);
 
   // Returns a new iterator over the table contents.
@@ -211,6 +226,8 @@ class BlockBasedTable : public TableReader {
   struct Rep;
   Rep* rep_;
   explicit BlockBasedTable(Rep* rep) : rep_(rep) {}
+  // wanqiang
+  explicit BlockBasedTable(Rep* rep, int file_id, std::map<uint64_t, int>* assignment_map) : rep_(rep),file_id_(file_id),assignment_map_(assignment_map) {} 
 
  private:
   friend class MockedBlockBasedTable;
@@ -239,6 +256,19 @@ class BlockBasedTable : public TableReader {
                                           Slice compression_dict,
                                           CachableEntry<Block>* block_entry,
                                           bool is_index = false);
+
+  // wanqiang
+  private:
+  int file_id_;
+  std::map<uint64_t,int> *assignment_map_;
+
+  public:
+  virtual void SetFileId(int file_id){
+    file_id_ = file_id;
+  }
+  virtual void SetAssignmentMap(std::map<uint64_t,int> *assignment_map){
+    assignment_map_=assignment_map;
+  }
 
   // huanchen
  public:

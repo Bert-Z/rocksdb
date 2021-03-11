@@ -7,15 +7,17 @@
 
 #include <stddef.h>
 #include <stdint.h>
+
 #include <memory>
 #include <string>
 #include <vector>
+
+#include "db/dbformat.h"
 #include "rocksdb/options.h"
 #include "rocksdb/slice.h"
 #include "rocksdb/slice_transform.h"
-#include "db/dbformat.h"
-#include "util/hash.h"
 #include "table/filter_block.h"
+#include "util/hash.h"
 
 namespace rocksdb {
 
@@ -99,14 +101,19 @@ class FullFilterBlockReader : public FilterBlockReader {
       const Slice& prefix, uint64_t block_offset = kNotValid,
       const bool no_io = false,
       const Slice* const const_ikey_ptr = nullptr) override;
-  
+
   // huanchen
-  virtual Slice Seek(
-      const Slice& key, unsigned* bitlen,
-      uint64_t block_offset = kNotValid,
-      const bool no_io = false,
-      const Slice* const const_ikey_ptr = nullptr) override;
-  
+  virtual Slice Seek(const Slice& key, unsigned* bitlen,
+                     uint64_t block_offset = kNotValid,
+                     const bool no_io = false,
+                     const Slice* const const_ikey_ptr = nullptr) override;
+
+//   // wanqiang
+//   virtual bool ElasticKeyMayMatch(
+//       const Slice& key, int opensize = 3, uint64_t block_offset = kNotValid,
+//       const bool no_io = false,
+//       const Slice* const const_ikey_ptr = nullptr) override;
+
   virtual size_t ApproximateMemoryUsage() const override;
 
  private:

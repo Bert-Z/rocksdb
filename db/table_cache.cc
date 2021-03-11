@@ -65,9 +65,14 @@ void AppendVarint64(IterKey* key, uint64_t v) {
 
 }  // namespace
 
+// wanqiang
 TableCache::TableCache(const ImmutableCFOptions& ioptions,
                        const EnvOptions& env_options, Cache* const cache)
-    : ioptions_(ioptions), env_options_(env_options), cache_(cache) {
+    : ioptions_(ioptions), 
+    env_options_(env_options), 
+    cache_(cache),file_access_map_(new std::map<uint64_t,std::pair<int,uint64_t>>()),
+    total_times_(0),
+    assignment_map_(new std::map<uint64_t,int>()) {
   if (ioptions_.row_cache) {
     // If the same cache is shared by multiple instances, we need to
     // disambiguate its entries.
@@ -75,7 +80,9 @@ TableCache::TableCache(const ImmutableCFOptions& ioptions,
   }
 }
 
+// wanqiang
 TableCache::~TableCache() {
+  coutFileAccessTimes();
 }
 
 TableReader* TableCache::GetTableReaderFromHandle(Cache::Handle* handle) {
@@ -112,11 +119,26 @@ Status TableCache::GetTableReader(
             std::move(file), fname, ioptions_.env,
             record_read_stats ? ioptions_.statistics : nullptr, SST_READ_MICROS,
             file_read_hist, ioptions_.rate_limiter, for_compaction));
-    s = ioptions_.table_factory->NewTableReader(
+    // s = ioptions_.table_factory->NewTableReader(
+    //     TableReaderOptions(ioptions_, env_options, internal_comparator,
+    //                        skip_filters, level),
+    //     std::move(file_reader), fd.GetFileSize(), table_reader,
+    //     prefetch_index_and_filter_in_cache);
+    
+    // wanqiang
+    uint64_t file_id=fd.GetNumber();
+    if(assignment_map_->find(file_id)==assignment_map_->end())
+      (*assignment_map_)[file_id]=3;
+    // std::cout<<(*assignment_map_)[file_id]<<std::endl;
+    s = ioptions_.table_factory->NewElasticTableReader(
         TableReaderOptions(ioptions_, env_options, internal_comparator,
                            skip_filters, level),
-        std::move(file_reader), fd.GetFileSize(), table_reader,
+        std::move(file_reader), fd.GetFileSize(), table_reader,file_id,getAssignmentMap(),
         prefetch_index_and_filter_in_cache);
+
+    // (*assignment_map_)[file_id]=4;
+    // ioptions_.table_factory->SetFileId(table_reader->get(),file_id);
+    // ioptions_.table_factory->SetAssignmentMap(table_reader->get(),getAssignmentMap());
     TEST_SYNC_POINT("TableCache::GetTableReader:0");
   }
   return s;
@@ -314,7 +336,20 @@ Status TableCache::Get(const ReadOptions& options,
                        bool skip_filters, int level) {
   std::string* row_cache_entry = nullptr;
   bool done = false;
+
+  // wanqiang
+  uint64_t file_id=fd.GetNumber();
+  if(file_access_map_->find(file_id) == file_access_map_->end())
+    (*file_access_map_)[file_id]=std::make_pair(level,1lu);
+  else
+    ++(*file_access_map_)[file_id].second;
+
+  ++total_times_;
+  // (*assignment_map_)[file_id]=3;
+  // std::cout<<assignment_map_->size()<<std::endl;
+
 #ifndef ROCKSDB_LITE
+  // std::cout<<"using lite"<<std::endl;
   IterKey row_cache_key;
   std::string row_cache_entry_buffer;
 
@@ -375,6 +410,7 @@ Status TableCache::Get(const ReadOptions& options,
   Cache::Handle* handle = nullptr;
   if (!done && s.ok()) {
     if (t == nullptr) {
+      std::cout<<"using find table"<<std::endl;
       s = FindTable(env_options_, internal_comparator, fd, &handle,
                     options.read_tier == kBlockCacheTier /* no_io */,
                     true /* record_read_stats */, file_read_hist, skip_filters,
@@ -383,6 +419,26 @@ Status TableCache::Get(const ReadOptions& options,
         t = GetTableReaderFromHandle(handle);
       }
     }
+    // else{
+    //   std::cout<<"not using find table"<<std::endl;
+    // }
+
+    // (*assignment_map_)[file_id]=3;
+    // wanqiang
+    if((*file_access_map_)[file_id].second > 1000lu && (*assignment_map_)[file_id] == 3){
+        std::cout<<"recache table reader"<<std::endl;
+
+      (*assignment_map_)[file_id]=4;
+      Evict(cache_,file_id);
+      s = FindTable(env_options_, internal_comparator, fd, &handle,
+                    options.read_tier == kBlockCacheTier /* no_io */,
+                    true /* record_read_stats */, file_read_hist, skip_filters,
+                    level);
+      if (s.ok()) {
+        t = GetTableReaderFromHandle(handle);
+      }
+    }
+    
     if (s.ok() && get_context->range_del_agg() != nullptr &&
         !options.ignore_range_deletions) {
       std::unique_ptr<InternalIterator> range_del_iter(
@@ -474,6 +530,20 @@ size_t TableCache::GetMemoryUsageByTableReader(
 
 void TableCache::Evict(Cache* cache, uint64_t file_number) {
   cache->Erase(GetSliceForFileNumber(&file_number));
+}
+
+void TableCache::coutFileAccessTimes() {
+  std::cout<<"file id,level,access times"<<std::endl;
+  for(auto e : (*file_access_map_)){
+    std::cout<<e.first<<','<<e.second.first<<','<<e.second.second<<std::endl;
+  }
+  return;
+}
+
+// wanqiang
+std::map<uint64_t,int> *TableCache::getAssignmentMap() const 
+{ 
+  return assignment_map_.get();
 }
 
 }  // namespace rocksdb
